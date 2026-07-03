@@ -1,0 +1,94 @@
+@import url("https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700;800&family=Quicksand:wght@500;600;700&display=swap");
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Baloo 2", "Quicksand", ui-rounded, system-ui, sans-serif;
+  --font-body: "Quicksand", ui-rounded, system-ui, sans-serif;
+}
+
+:root {
+  color-scheme: light;
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-body);
+  background: #f5f3ff;
+  color: #1e1b4b;
+  overscroll-behavior-y: none;
+}
+
+/* ---- Animations ---- */
+@keyframes ggFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+@keyframes ggPop {
+  0% { transform: scale(0.7); opacity: 0; }
+  60% { transform: scale(1.08); opacity: 1; }
+  100% { transform: scale(1); }
+}
+@keyframes ggSparkle {
+  0%, 100% { opacity: 0; transform: scale(0.6) rotate(0deg); }
+  50% { opacity: 1; transform: scale(1.1) rotate(20deg); }
+}
+@keyframes ggShimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+@keyframes ggConfettiFall {
+  0% { transform: translateY(-10vh) rotate(0deg); opacity: 1; }
+  100% { transform: translateY(110vh) rotate(720deg); opacity: 0; }
+}
+@keyframes ggSlideUp {
+  from { transform: translateY(16px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+@keyframes ggPulseRing {
+  0% { box-shadow: 0 0 0 0 rgba(124, 58, 237, 0.4); }
+  70% { box-shadow: 0 0 0 14px rgba(124, 58, 237, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(124, 58, 237, 0); }
+}
+
+.gg-float { animation: ggFloat 4s ease-in-out infinite; }
+.gg-pop { animation: ggPop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+.gg-slide-up { animation: ggSlideUp 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+.gg-pulse-ring { animation: ggPulseRing 2s infinite; }
+
+.gg-press {
+  transition: transform 0.12s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.12s ease;
+}
+.gg-press:active {
+  transform: scale(0.95);
+}
+
+.gg-sparkle {
+  position: absolute;
+  pointer-events: none;
+  animation: ggSparkle 1.8s ease-in-out infinite;
+}
+
+/* Photo filter transition */
+.gg-photo-transition {
+  transition: filter 600ms ease, opacity 600ms ease, transform 600ms ease;
+}
+
+/* Hide scrollbars on horizontal scrollers but keep function */
+.gg-no-scrollbar::-webkit-scrollbar { display: none; }
+.gg-no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+.gg-shimmer {
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.5), transparent);
+  background-size: 200% 100%;
+  animation: ggShimmer 2.5s infinite;
+}
