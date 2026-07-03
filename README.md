@@ -4,6 +4,11 @@ A bright, playful allowance-budgeting web app for ages 10–16. Kids set a savin
 goal with a photo — and that photo **glows when they stay on track and fades when
 they overspend**. Two modes: a fun **Kid Mode** and a calmer, PIN-locked **Parent Mode**.
 
+**Live app:** https://steveartemails-cmyk.github.io/goalglow/ — installable as a
+PWA (Add to Home Screen). Every push to `main` deploys automatically via GitHub
+Actions. [Privacy policy](https://steveartemails-cmyk.github.io/goalglow/privacy.html):
+no accounts, no tracking, all data stays on the device.
+
 ## Run it
 
 ```bash
