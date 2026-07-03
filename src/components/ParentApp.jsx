@@ -1,34 +1,77 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import * as H from '../health';
 import { categoryById, FREQUENCY_LABELS, CURRENCIES } from '../content';
 import { Button, Card, Sheet } from './ui';
 import { fileToDownscaledDataURL } from '../image';
+import { hashPin } from '../storage';
+import { sanitizeMoneyInput, parseMoney } from '../input';
+
+const MAX_PIN_ATTEMPTS = 5;
+const PIN_LOCK_MS = 30 * 1000;
 
 export default function ParentApp({ state, actions }) {
   const [unlocked, setUnlocked] = useState(false);
 
   if (!unlocked) {
-    return <PinGate state={state} onUnlock={() => setUnlocked(true)} onCancel={() => actions.setMode('kid')} />;
+    return (
+      <PinGate
+        state={state}
+        onUnlock={() => setUnlocked(true)}
+        onCancel={() => actions.setMode('kid')}
+        onForgot={() => {
+          if (
+            confirm(
+              'Forgot the PIN?\n\nThe only way back in is to erase ALL GoalGlow data on this device — goal, savings history, badges, everything — and set up again from scratch.\n\nErase everything now?'
+            )
+          ) {
+            actions.resetEverything();
+          }
+        }}
+      />
+    );
   }
   return <ParentDashboard state={state} actions={actions} />;
 }
 
-function PinGate({ state, onUnlock, onCancel }) {
+function PinGate({ state, onUnlock, onCancel, onForgot }) {
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
+  const [attempts, setAttempts] = useState(0);
+  const [lockedUntil, setLockedUntil] = useState(0);
+  const [, forceTick] = useState(0);
+  const timerRef = useRef(null);
+
+  // Re-render once a second while locked so the countdown stays honest.
+  useEffect(() => {
+    if (!lockedUntil) return;
+    timerRef.current = setInterval(() => forceTick((n) => n + 1), 1000);
+    return () => clearInterval(timerRef.current);
+  }, [lockedUntil]);
+
+  const locked = lockedUntil > Date.now();
+  const lockSecondsLeft = locked ? Math.ceil((lockedUntil - Date.now()) / 1000) : 0;
 
   const check = (value) => {
     if (value.length === 4) {
-      if (value === state.profile.parentPin) {
+      if (hashPin(value) === state.profile.parentPinHash) {
         onUnlock();
       } else {
-        setError('That PIN isn\'t right.');
+        const n = attempts + 1;
+        if (n >= MAX_PIN_ATTEMPTS) {
+          setLockedUntil(Date.now() + PIN_LOCK_MS);
+          setAttempts(0);
+          setError('');
+        } else {
+          setAttempts(n);
+          setError("That PIN isn't right.");
+        }
         setTimeout(() => setPin(''), 400);
       }
     }
   };
 
   const press = (d) => {
+    if (locked) return;
     setError('');
     const next = (pin + d).slice(0, 4);
     setPin(next);
@@ -52,8 +95,13 @@ function PinGate({ state, onUnlock, onCancel }) {
         ))}
       </div>
       {error && <p className="mt-3 text-sm font-bold text-rose-500">{error}</p>}
+      {locked && (
+        <p className="mt-3 text-sm font-bold text-amber-600">
+          Too many tries — take a break for {lockSecondsLeft}s ⏳
+        </p>
+      )}
 
-      <div className="mt-8 grid grid-cols-3 gap-4">
+      <div className={`mt-8 grid grid-cols-3 gap-4 ${locked ? 'pointer-events-none opacity-40' : ''}`}>
         {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => (
           <PinKey key={n} onClick={() => press(String(n))}>{n}</PinKey>
         ))}
@@ -64,6 +112,9 @@ function PinGate({ state, onUnlock, onCancel }) {
 
       <button onClick={onCancel} className="mt-8 font-bold text-slate-400">
         ← Back to {state.profile.childName}'s screen
+      </button>
+      <button onClick={onForgot} className="mt-3 text-sm font-bold text-slate-300 underline">
+        Forgot PIN?
       </button>
     </div>
   );
@@ -123,6 +174,12 @@ function ParentDashboard({ state, actions }) {
           detail={state.parentMessage || 'None yet — leave a note for the kid'}
           onClick={() => setSheet('message')}
         />
+        <SettingRow
+          icon="🧒"
+          title="Name & parent PIN"
+          detail={`${state.profile.childName} · PIN ••••`}
+          onClick={() => setSheet('profile')}
+        />
 
         <PaymentCard state={state} actions={actions} />
         <ActivityFeed state={state} actions={actions} />
@@ -142,6 +199,7 @@ function ParentDashboard({ state, actions }) {
       {sheet === 'allowance' && <AllowanceSheet state={state} actions={actions} onClose={() => setSheet(null)} />}
       {sheet === 'goal' && <GoalSheet state={state} actions={actions} onClose={() => setSheet(null)} />}
       {sheet === 'message' && <MessageSheet state={state} actions={actions} onClose={() => setSheet(null)} />}
+      {sheet === 'profile' && <ProfileSheet state={state} actions={actions} onClose={() => setSheet(null)} />}
     </div>
   );
 }
@@ -189,29 +247,64 @@ function SettingRow({ icon, title, detail, onClick }) {
 
 function PaymentCard({ state, actions }) {
   const currency = state.settings.currency;
-  const last = state.allowancePayments[0];
+  const [cooldown, setCooldown] = useState(false);
+  const cooldownRef = useRef(false); // state alone is stale within one tick — a bounce fires both taps before re-render
+  const recent = state.allowancePayments.slice(0, 5);
+
+  const markPaid = () => {
+    if (cooldownRef.current) return;
+    cooldownRef.current = true;
+    setCooldown(true);
+    setTimeout(() => {
+      cooldownRef.current = false;
+      setCooldown(false);
+    }, 2500);
+    actions.recordAllowancePayment(state.settings.allowanceAmount);
+    actions.showToast(`Recorded ${H.money(state.settings.allowanceAmount, currency)} allowance 💛`, 'success');
+  };
+
   return (
     <Card className="p-4">
       <div className="flex items-center justify-between">
         <div>
           <div className="font-display font-extrabold text-slate-800">Allowance paid</div>
           <div className="text-sm font-medium text-slate-500">
-            {last
-              ? `Last: ${H.money(last.amount, currency)} on ${new Date(last.timestamp).toLocaleDateString()}`
-              : 'No payments recorded yet'}
+            {recent.length === 0 ? 'No payments recorded yet' : 'Recent payments'}
           </div>
         </div>
-        <Button
-          variant="primary"
-          className="!py-2.5 !px-4 text-sm"
-          onClick={() => {
-            actions.recordAllowancePayment(state.settings.allowanceAmount);
-            actions.showToast(`Recorded ${H.money(state.settings.allowanceAmount, currency)} allowance 💛`, 'success');
-          }}
-        >
+        <Button variant="primary" className="!py-2.5 !px-4 text-sm" onClick={markPaid} disabled={cooldown}>
           Mark paid
         </Button>
       </div>
+      {recent.length > 0 && (
+        <div className="mt-3 space-y-1">
+          {recent.map((p) => (
+            <div key={p.id} className="flex items-center gap-3 rounded-xl bg-slate-50 px-3 py-2">
+              <span className="text-base">{p.amount < 0 ? '🎯' : '💛'}</span>
+              <div className="flex-1 text-sm font-bold text-slate-600">
+                {p.amount < 0 ? 'Goal purchase' : 'Allowance'}
+                <span className="ml-2 text-xs font-medium text-slate-400">
+                  {new Date(p.timestamp).toLocaleDateString()}
+                </span>
+              </div>
+              <span className="font-display text-sm font-extrabold text-slate-700">
+                {H.money(p.amount, currency)}
+              </span>
+              <button
+                aria-label="Remove payment"
+                className="gg-press px-1 text-slate-300 hover:text-rose-400"
+                onClick={() => {
+                  if (confirm(`Remove this ${H.money(p.amount, currency)} entry?`)) {
+                    actions.deleteAllowancePayment(p.id);
+                  }
+                }}
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </Card>
   );
 }
@@ -249,7 +342,7 @@ function ActivityFeed({ state, actions }) {
               <div className="font-display text-sm font-extrabold text-slate-700">
                 {H.money(t.amount, currency)}
               </div>
-              <button onClick={() => setEditing(t)} className="gg-press text-slate-300">✏️</button>
+              <button onClick={() => setEditing(t)} className="gg-press text-slate-300" aria-label="Edit entry">✏️</button>
             </div>
           );
         })}
@@ -287,7 +380,7 @@ function ParentEditTx({ tx, onClose, onSave, onDelete, currency }) {
           <input
             inputMode="decimal"
             value={amount}
-            onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ''))}
+            onChange={(e) => setAmount(sanitizeMoneyInput(e.target.value))}
             className="w-full bg-transparent px-2 font-display text-xl outline-none"
           />
         </div>
@@ -298,11 +391,16 @@ function ParentEditTx({ tx, onClose, onSave, onDelete, currency }) {
           value={note}
           onChange={(e) => setNote(e.target.value)}
           className="w-full rounded-2xl border-2 border-slate-200 px-4 py-3 outline-none"
+          maxLength={40}
         />
       </label>
       <div className="mt-5 flex gap-3">
         <Button variant="danger" onClick={onDelete}>Delete</Button>
-        <Button className="flex-1" onClick={() => onSave({ amount: parseFloat(amount) || 0, note })}>
+        <Button
+          className="flex-1"
+          disabled={parseMoney(amount) <= 0}
+          onClick={() => onSave({ amount: parseMoney(amount), note })}
+        >
           Save correction
         </Button>
       </div>
@@ -316,8 +414,9 @@ function AllowanceSheet({ state, actions, onClose }) {
   const [spend, setSpend] = useState(Math.round(state.settings.spendPercent * 100));
   const [currency, setCurrency] = useState(state.settings.currency);
 
+  const amt = parseMoney(amount);
   const save = () => {
-    const amt = parseFloat(amount) || 0;
+    if (amt <= 0) return;
     actions.updateSettings({
       allowanceAmount: amt,
       frequency,
@@ -355,11 +454,16 @@ function AllowanceSheet({ state, actions, onClose }) {
           <input
             inputMode="decimal"
             value={amount}
-            onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ''))}
+            onChange={(e) => setAmount(sanitizeMoneyInput(e.target.value))}
             className="w-full bg-transparent px-2 font-display text-xl outline-none"
           />
         </div>
       </label>
+      {amt <= 0 && (
+        <p className="mt-2 text-xs font-bold text-rose-500">
+          Allowance must be more than zero — otherwise every spend counts as over the limit.
+        </p>
+      )}
 
       <div className="mt-4">
         <span className="mb-2 block text-sm font-bold text-slate-600">Frequency</span>
@@ -392,16 +496,11 @@ function AllowanceSheet({ state, actions, onClose }) {
           className="w-full accent-violet-500"
         />
         <p className="mt-2 text-xs font-medium text-slate-500">
-          Daily spend limit becomes{' '}
-          {H.money(
-            ((parseFloat(amount) || 0) * (spend / 100)) / H.daysInPeriod(frequency),
-            currency
-          )}
-          .
+          Daily spend limit becomes {H.money((amt * (spend / 100)) / H.daysInPeriod(frequency), currency)}.
         </p>
       </div>
 
-      <Button className="mt-6 w-full" onClick={save}>Save changes</Button>
+      <Button className="mt-6 w-full" onClick={save} disabled={amt <= 0}>Save changes</Button>
     </Sheet>
   );
 }
@@ -411,6 +510,9 @@ function GoalSheet({ state, actions, onClose }) {
   const [cost, setCost] = useState(String(state.goal.targetCost));
   const [photo, setPhoto] = useState(state.goal.photo);
   const [busy, setBusy] = useState(false);
+  const [newGoalMode, setNewGoalMode] = useState(false);
+  const goalReached = H.progressPercent(state) >= 1;
+  const currency = state.settings.currency;
 
   const onPhoto = async (e) => {
     const file = e.target.files?.[0];
@@ -426,25 +528,66 @@ function GoalSheet({ state, actions, onClose }) {
     }
   };
 
+  const ready = name.trim() && parseMoney(cost) > 0;
   const save = () => {
-    actions.updateGoal({
-      name,
-      targetCost: parseFloat(cost) || 0,
-      photo,
-      parentApproved: true,
-    });
-    actions.showToast('Goal updated 🎯', 'success');
+    if (!ready) return;
+    if (newGoalMode) {
+      actions.startNewGoal({
+        name: name.trim(),
+        targetCost: parseMoney(cost),
+        photo,
+        previousCost: state.goal.targetCost,
+      });
+      actions.showToast(`New goal started: ${name.trim()} 🌟`, 'success');
+    } else {
+      actions.updateGoal({
+        name: name.trim(),
+        targetCost: parseMoney(cost),
+        photo,
+        parentApproved: true,
+      });
+      actions.showToast('Goal updated 🎯', 'success');
+    }
     onClose();
   };
 
   return (
-    <Sheet open onClose={onClose} title="Savings goal">
+    <Sheet open onClose={onClose} title={newGoalMode ? 'New goal 🌟' : 'Savings goal'}>
+      {goalReached && !newGoalMode && (
+        <div className="mb-4 rounded-2xl bg-amber-50 p-4">
+          <p className="text-sm font-bold text-amber-700">
+            🏆 Goal reached! Once {state.profile.childName} has {state.goal.name}, start the next
+            one — {H.money(state.goal.targetCost, currency)} comes out of the savings pot and the
+            leftovers roll over.
+          </p>
+          <Button
+            variant="primary"
+            className="mt-3 w-full !py-2.5 text-sm"
+            onClick={() => {
+              setNewGoalMode(true);
+              setName('');
+              setCost('');
+              setPhoto('');
+            }}
+          >
+            🎉 Bought it — start a new goal
+          </Button>
+        </div>
+      )}
+      {newGoalMode && (
+        <p className="mb-4 rounded-2xl bg-violet-50 p-3 text-xs font-bold text-violet-600">
+          Saving this records the {H.money(state.goal.targetCost, currency)} goal purchase and
+          starts fresh with the goal below.
+        </p>
+      )}
       <label className="block">
         <span className="mb-1 block text-sm font-bold text-slate-600">Goal name</span>
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
           className="w-full rounded-2xl border-2 border-slate-200 px-4 py-3 font-display text-lg outline-none"
+          maxLength={30}
+          placeholder={newGoalMode ? 'e.g. Lego set' : undefined}
         />
       </label>
       <label className="mt-3 block">
@@ -454,7 +597,7 @@ function GoalSheet({ state, actions, onClose }) {
           <input
             inputMode="decimal"
             value={cost}
-            onChange={(e) => setCost(e.target.value.replace(/[^0-9.]/g, ''))}
+            onChange={(e) => setCost(sanitizeMoneyInput(e.target.value))}
             className="w-full bg-transparent px-2 font-display text-xl outline-none"
           />
         </div>
@@ -472,7 +615,69 @@ function GoalSheet({ state, actions, onClose }) {
           <input type="file" accept="image/*" onChange={onPhoto} className="hidden" />
         </label>
       </div>
-      <Button className="mt-6 w-full" onClick={save}>Save goal</Button>
+      <Button className="mt-6 w-full" onClick={save} disabled={!ready}>
+        {newGoalMode ? 'Start new goal 🌟' : 'Save goal'}
+      </Button>
+    </Sheet>
+  );
+}
+
+function ProfileSheet({ state, actions, onClose }) {
+  const [name, setName] = useState(state.profile.childName);
+  const [newPin, setNewPin] = useState('');
+  const [pinConfirm, setPinConfirm] = useState('');
+
+  const pinEntered = newPin.length > 0 || pinConfirm.length > 0;
+  const pinValid = /^\d{4}$/.test(newPin) && newPin === pinConfirm;
+  const canSave = name.trim() && (!pinEntered || pinValid);
+
+  const save = () => {
+    if (!canSave) return;
+    actions.updateProfile({
+      childName: name.trim(),
+      ...(pinEntered && pinValid ? { parentPinHash: hashPin(newPin) } : {}),
+    });
+    actions.showToast(pinEntered ? 'Name and PIN updated 🔒' : 'Name updated ✨', 'success');
+    onClose();
+  };
+
+  const pinField = (label, value, onChange) => (
+    <label className="mt-3 block">
+      <span className="mb-1 block text-sm font-bold text-slate-600">{label}</span>
+      <input
+        inputMode="numeric"
+        pattern="\d*"
+        maxLength={4}
+        value={value}
+        onChange={(e) => onChange(e.target.value.replace(/\D/g, '').slice(0, 4))}
+        className="w-full rounded-2xl border-2 border-slate-200 px-4 py-3 text-center font-display text-xl tracking-[0.5em] outline-none"
+        placeholder="••••"
+      />
+    </label>
+  );
+
+  return (
+    <Sheet open onClose={onClose} title="Name & parent PIN">
+      <label className="block">
+        <span className="mb-1 block text-sm font-bold text-slate-600">Child's name</span>
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          className="w-full rounded-2xl border-2 border-slate-200 px-4 py-3 font-display text-lg outline-none"
+          maxLength={20}
+        />
+      </label>
+      <p className="mt-5 text-sm font-bold text-slate-600">Change PIN (optional)</p>
+      {pinField('New 4-digit PIN', newPin, setNewPin)}
+      {pinField('Confirm new PIN', pinConfirm, setPinConfirm)}
+      {pinEntered && !pinValid && (
+        <p className="mt-2 text-xs font-bold text-rose-500">
+          PIN must be exactly 4 digits and match in both boxes.
+        </p>
+      )}
+      <Button className="mt-6 w-full" onClick={save} disabled={!canSave}>
+        Save
+      </Button>
     </Sheet>
   );
 }

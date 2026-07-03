@@ -43,7 +43,7 @@ export const BADGES = {
   streak14: { id: 'streak14', emoji: '🏆', name: 'Two-Week Titan', desc: '14 days on track' },
   half: { id: 'half', emoji: '🌗', name: 'Halfway Hero', desc: 'Halfway to your goal' },
   goal: { id: 'goal', emoji: '🎯', name: 'Goal Getter', desc: 'Reached your goal!' },
-  brightStart: { id: 'brightStart', emoji: '🌟', name: 'Bright Spark', desc: 'Kept your goal glowing at full health' },
+  brightStart: { id: 'brightStart', emoji: '🌟', name: 'Bright Spark', desc: 'A whole week at full glow' },
 };
 
 export const FREQUENCY_LABELS = {

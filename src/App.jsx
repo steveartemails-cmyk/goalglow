@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { loadState, saveState, clearState, uid, defaultState } from './storage';
+import { loadState, saveState, clearState, uid, defaultState, hashPin } from './storage';
 import * as H from './health';
 import { BADGES } from './content';
 import { Confetti, Toast } from './components/ui';
@@ -27,6 +27,34 @@ export default function App() {
   useEffect(() => {
     saveState(state);
   }, [state]);
+
+  // Close out days that end while the app stays open (installed PWAs and
+  // native shells can live in memory across midnights — launch-time catch-up
+  // alone never fires for them).
+  useEffect(() => {
+    if (!state.onboarded) return;
+    const tick = () => {
+      setState((s) => {
+        const caught = H.catchUpHealth(s);
+        if (
+          caught.lastEvaluatedDate === s.lastEvaluatedDate &&
+          caught.healthLog.length === s.healthLog.length
+        ) {
+          return s; // nothing closed — keep the same object, no re-render
+        }
+        return { ...s, ...caught };
+      });
+    };
+    const onVisible = () => {
+      if (!document.hidden) tick();
+    };
+    const id = setInterval(tick, 60 * 1000);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [state.onboarded]);
 
   const fireConfetti = useCallback(() => setConfettiKey((k) => k + 1), []);
   const showToast = useCallback((message, tone = 'info', duration = 3200) => {
@@ -63,7 +91,8 @@ export default function App() {
     if (streak >= 14) toAdd.push('streak14');
     if (pct >= 0.5) toAdd.push('half');
     if (pct >= 1) toAdd.push('goal');
-    if (state.health >= 100) toAdd.push('brightStart');
+    // Earned, not given: a full week of closed days with health still at 100.
+    if (state.health >= 100 && state.healthLog.length >= 7) toAdd.push('brightStart');
 
     const newOnes = toAdd.filter((b) => !state.badges.includes(b));
     if (newOnes.length > 0) {
@@ -83,7 +112,7 @@ export default function App() {
     setState((s) => ({
       ...s,
       onboarded: true,
-      profile: { ...s.profile, childName: data.childName, parentPin: data.parentPin },
+      profile: { ...s.profile, childName: data.childName, parentPinHash: hashPin(data.parentPin) },
       settings: {
         ...s.settings,
         allowanceAmount: data.allowanceAmount,
@@ -99,7 +128,8 @@ export default function App() {
         parentApproved: true,
       },
       health: H.HEALTH_START,
-      lastEvaluatedDate: H.todayKey(),
+      // Yesterday = last closed, scored day — so today gets scored tomorrow.
+      lastEvaluatedDate: H.yesterdayKey(),
       startDate: Date.now(),
       // Record the first allowance as paid so the kid has something to work with.
       allowancePayments: data.markFirstPaid
@@ -158,7 +188,12 @@ export default function App() {
     setState((s) => ({ ...s, goal: { ...s.goal, ...patch } }));
   }, []);
 
+  const updateProfile = useCallback((patch) => {
+    setState((s) => ({ ...s, profile: { ...s.profile, ...patch } }));
+  }, []);
+
   const recordAllowancePayment = useCallback((amount) => {
+    if (!(amount > 0)) return;
     setState((s) => ({
       ...s,
       allowancePayments: [
@@ -166,6 +201,36 @@ export default function App() {
         ...s.allowancePayments,
       ],
     }));
+  }, []);
+
+  const deleteAllowancePayment = useCallback((id) => {
+    setState((s) => ({
+      ...s,
+      allowancePayments: s.allowancePayments.filter((p) => p.id !== id),
+    }));
+  }, []);
+
+  // The old goal was bought: deduct its cost from the savings pot (as a
+  // negative "payment", so spending history and health are untouched) and
+  // swap in the new goal.
+  const startNewGoal = useCallback(({ name, targetCost, photo, previousCost }) => {
+    setState((s) => ({
+      ...s,
+      goal: { name, targetCost, photo, parentApproved: true },
+      allowancePayments:
+        previousCost > 0
+          ? [
+              { id: uid(), amount: -previousCost, timestamp: Date.now(), note: 'goal-purchase' },
+              ...s.allowancePayments,
+            ]
+          : s.allowancePayments,
+      goalCelebrated: false,
+      badges: s.badges.filter((b) => b !== 'half' && b !== 'goal'),
+    }));
+  }, []);
+
+  const markGoalCelebrated = useCallback(() => {
+    setState((s) => (s.goalCelebrated ? s : { ...s, goalCelebrated: true }));
   }, []);
 
   const setParentMessage = useCallback((msg) => {
@@ -195,7 +260,11 @@ export default function App() {
       deleteTransaction,
       updateSettings,
       updateGoal,
+      updateProfile,
       recordAllowancePayment,
+      deleteAllowancePayment,
+      startNewGoal,
+      markGoalCelebrated,
       setParentMessage,
       awardBadge,
       resetEverything,
@@ -209,7 +278,11 @@ export default function App() {
       deleteTransaction,
       updateSettings,
       updateGoal,
+      updateProfile,
       recordAllowancePayment,
+      deleteAllowancePayment,
+      startNewGoal,
+      markGoalCelebrated,
       setParentMessage,
       awardBadge,
       resetEverything,
@@ -230,7 +303,7 @@ export default function App() {
   }
 
   return (
-    <div className="mx-auto min-h-full max-w-md">
+    <div className="mx-auto min-h-full max-w-md" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
       {view}
       <Confetti fire={confettiKey} />
       <Toast toast={toast} onClose={() => setToast(null)} />

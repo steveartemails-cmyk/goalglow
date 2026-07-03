@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie,
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, ReferenceLine,
 } from 'recharts';
 import * as H from '../health';
 import { CATEGORIES, categoryById, BADGES } from '../content';
@@ -100,7 +100,7 @@ function WeeklyChart({ state }) {
             formatter={(v) => [H.money(v, currency), 'Spent']}
             contentStyle={{ borderRadius: 16, border: 'none', boxShadow: '0 8px 24px rgba(124,58,237,0.15)', fontWeight: 700 }}
           />
-          {/* limit reference line drawn as a thin bar background via ReferenceLine alt */}
+          <ReferenceLine y={limit} stroke="#c026d3" strokeDasharray="6 4" strokeWidth={2} />
           <Bar dataKey="spend" radius={[8, 8, 8, 8]} maxBarSize={28}>
             {data.map((d, i) => (
               <Cell key={i} fill={d.over ? '#fb923c' : '#a78bfa'} />

@@ -4,6 +4,7 @@ import { CATEGORIES, categoryById, tipForDay, BADGES } from '../content';
 import { Button, Card, Sheet, CountUp } from './ui';
 import FadingPhoto from './FadingPhoto';
 import KidDashboard from './KidDashboard';
+import { sanitizeMoneyInput, parseMoney } from '../input';
 
 export default function KidApp({ state, actions }) {
   const [tab, setTab] = useState('home');
@@ -64,8 +65,40 @@ function Home({ state, actions, onAdd }) {
   const streak = H.currentStreak(state);
   const like = H.likelihood(state, state.goal.name);
   const overToday = left < 0;
+  const goalReached = H.progressPercent(state) >= 1;
 
   const tip = useMemo(() => tipForDay(H.todayKey()), []);
+
+  // One big party the first time the goal is reached.
+  useEffect(() => {
+    if (goalReached && !state.goalCelebrated) {
+      actions.fireConfetti();
+      actions.markGoalCelebrated();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [goalReached, state.goalCelebrated]);
+
+  if (goalReached) {
+    return (
+      <div className="space-y-4">
+        <Card className="gg-slide-up bg-gradient-to-br from-amber-300 via-orange-300 to-rose-300 p-6 text-center">
+          <div className="gg-float text-6xl">🏆</div>
+          <h2 className="mt-2 font-display text-3xl font-extrabold text-amber-900">
+            YOU DID IT{state.profile.childName ? `, ${state.profile.childName}` : ''}!
+          </h2>
+          <p className="mt-2 font-display text-lg font-bold text-amber-800">
+            You've saved {H.money(H.savedSoFar(state), currency)} — enough for your {state.goal.name}! 🎉
+          </p>
+          <p className="mt-3 text-sm font-semibold text-amber-700">
+            Show a grown-up! When you've got it, they can set up your next goal in Grown-up
+            settings.
+          </p>
+        </Card>
+        <FadingPhoto state={state} />
+        <RecentList state={state} actions={actions} />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -235,7 +268,7 @@ function EditTx({ tx, onClose, onSave, onDelete, currency }) {
           <input
             inputMode="decimal"
             value={amount}
-            onChange={(e) => setAmount(e.target.value)}
+            onChange={(e) => setAmount(sanitizeMoneyInput(e.target.value))}
             className="w-full bg-transparent px-2 font-display text-xl outline-none"
           />
         </div>
@@ -247,13 +280,15 @@ function EditTx({ tx, onClose, onSave, onDelete, currency }) {
           onChange={(e) => setNote(e.target.value)}
           className="w-full rounded-2xl border-2 border-violet-100 px-4 py-3 outline-none focus:border-violet-400"
           placeholder="Optional"
+          maxLength={40}
         />
       </label>
       <div className="mt-5 flex gap-3">
         <Button variant="danger" onClick={onDelete}>Delete</Button>
         <Button
           className="flex-1"
-          onClick={() => onSave({ amount: parseFloat(amount) || 0, note, category })}
+          disabled={parseMoney(amount) <= 0}
+          onClick={() => onSave({ amount: parseMoney(amount), note, category })}
         >
           Save
         </Button>
@@ -341,7 +376,7 @@ function AddSpending({ open, onClose, state, actions, currency }) {
             autoFocus
             inputMode="decimal"
             value={amount}
-            onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ''))}
+            onChange={(e) => setAmount(sanitizeMoneyInput(e.target.value))}
             className="w-full bg-transparent px-2 font-display text-2xl outline-none"
             placeholder="0.00"
           />
@@ -392,7 +427,10 @@ function AddSpending({ open, onClose, state, actions, currency }) {
 
 function BottomNav({ tab, setTab, onAdd }) {
   return (
-    <div className="fixed inset-x-0 bottom-0 z-30 mx-auto max-w-md px-4 pb-4">
+    <div
+      className="fixed inset-x-0 bottom-0 z-30 mx-auto max-w-md px-4"
+      style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))' }}
+    >
       <div className="flex items-center justify-around rounded-3xl bg-white/90 p-2 shadow-xl backdrop-blur">
         <NavBtn active={tab === 'home'} onClick={() => setTab('home')} emoji="🏠" label="Home" />
         <button

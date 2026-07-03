@@ -3,20 +3,23 @@ import { Button, Card } from './ui';
 import { FREQUENCY_LABELS, CURRENCIES } from '../content';
 import { money } from '../health';
 import { fileToDownscaledDataURL } from '../image';
+import { sanitizeMoneyInput, parseMoney } from '../input';
 
 // Parent-first onboarding wizard.
 export default function Onboarding({ onFinish }) {
   const [step, setStep] = useState(0);
+  // Money fields stay strings while typing (see src/input.js) and are parsed
+  // once on finish.
   const [data, setData] = useState({
     parentPin: '',
     pinConfirm: '',
     childName: '',
-    allowanceAmount: 10,
+    allowanceAmount: '10',
     frequency: 'weekly',
     spendPercent: 0.5,
     savePercent: 0.5,
     goalName: '',
-    targetCost: 50,
+    targetCost: '50',
     photo: '',
     currency: '£',
     markFirstPaid: true,
@@ -34,7 +37,17 @@ export default function Onboarding({ onFinish }) {
     <SplitStep key="split" data={data} set={set} onNext={next} onBack={back} />,
     <GoalStep key="goal" data={data} set={set} onNext={next} onBack={back} />,
     <HandoverStep key="hand" data={data} onNext={next} onBack={back} />,
-    <KidWelcome key="kid" data={data} onFinish={() => onFinish(data)} />,
+    <KidWelcome
+      key="kid"
+      data={data}
+      onFinish={() =>
+        onFinish({
+          ...data,
+          allowanceAmount: parseMoney(data.allowanceAmount),
+          targetCost: parseMoney(data.targetCost),
+        })
+      }
+    />,
   ];
 
   const totalDots = steps.length - 2; // welcome + kid-welcome aren't "progress"
@@ -193,7 +206,7 @@ function AllowanceStep({ data, set, onNext, onBack }) {
           <input
             inputMode="decimal"
             value={data.allowanceAmount}
-            onChange={(e) => set({ allowanceAmount: clampMoney(e.target.value) })}
+            onChange={(e) => set({ allowanceAmount: sanitizeMoneyInput(e.target.value) })}
             className="w-full bg-transparent px-2 font-display text-xl outline-none"
           />
         </div>
@@ -220,7 +233,7 @@ function AllowanceStep({ data, set, onNext, onBack }) {
 
       <div className="mt-auto flex gap-3 pt-8">
         <Button variant="soft" onClick={onBack}>Back</Button>
-        <Button onClick={onNext} className="flex-1" disabled={!(data.allowanceAmount > 0)}>Next</Button>
+        <Button onClick={onNext} className="flex-1" disabled={!(parseMoney(data.allowanceAmount) > 0)}>Next</Button>
       </div>
     </StepShell>
   );
@@ -261,8 +274,8 @@ function SplitStep({ data, set, onNext, onBack }) {
         className="mt-8 w-full accent-violet-500"
       />
       <p className="mt-3 text-center text-sm font-semibold text-violet-600">
-        Saves {money(data.allowanceAmount * data.savePercent, data.currency)} of every{' '}
-        {money(data.allowanceAmount, data.currency)} allowance.
+        Saves {money(parseMoney(data.allowanceAmount) * data.savePercent, data.currency)} of every{' '}
+        {money(parseMoney(data.allowanceAmount), data.currency)} allowance.
       </p>
 
       <div className="mt-auto flex gap-3 pt-8">
@@ -288,7 +301,7 @@ function GoalStep({ data, set, onNext, onBack }) {
       setBusy(false);
     }
   };
-  const ready = data.goalName.trim() && data.targetCost > 0;
+  const ready = data.goalName.trim() && parseMoney(data.targetCost) > 0;
   return (
     <StepShell>
       <ParentBadge />
@@ -316,7 +329,7 @@ function GoalStep({ data, set, onNext, onBack }) {
           <input
             inputMode="decimal"
             value={data.targetCost}
-            onChange={(e) => set({ targetCost: clampMoney(e.target.value) })}
+            onChange={(e) => set({ targetCost: sanitizeMoneyInput(e.target.value) })}
             className="w-full bg-transparent px-2 font-display text-xl outline-none"
           />
         </div>
@@ -356,8 +369,8 @@ function HandoverStep({ data, onNext, onBack }) {
       <Card className="mt-2 bg-violet-50 p-5">
         <h2 className="font-display text-2xl font-extrabold text-violet-900">All set! 🎉</h2>
         <ul className="mt-4 space-y-2 text-sm font-semibold text-violet-700">
-          <li>🐷 Saving {Math.round(data.savePercent * 100)}% of {money(data.allowanceAmount, data.currency)} {FREQUENCY_LABELS[data.frequency].toLowerCase()}</li>
-          <li>🎯 Goal: {data.goalName} ({money(data.targetCost, data.currency)})</li>
+          <li>🐷 Saving {Math.round(data.savePercent * 100)}% of {money(parseMoney(data.allowanceAmount), data.currency)} {FREQUENCY_LABELS[data.frequency].toLowerCase()}</li>
+          <li>🎯 Goal: {data.goalName} ({money(parseMoney(data.targetCost), data.currency)})</li>
           <li>🔒 Settings locked with your PIN</li>
         </ul>
       </Card>
@@ -398,7 +411,3 @@ function KidWelcome({ data, onFinish }) {
   );
 }
 
-function clampMoney(v) {
-  const n = parseFloat(String(v).replace(/[^0-9.]/g, ''));
-  return Number.isFinite(n) ? n : 0;
-}

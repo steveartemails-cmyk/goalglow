@@ -92,6 +92,13 @@ export function todayKey() {
   return toDateKey(new Date());
 }
 
+// The most recent CLOSED day — i.e. yesterday.
+export function yesterdayKey() {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return toDateKey(d);
+}
+
 // All date keys strictly between `fromKey` (exclusive) and `toKey` (exclusive).
 export function daysBetweenExclusive(fromKey, toKey) {
   const out = [];
@@ -119,34 +126,42 @@ export function spendOnDate(transactions, dateKey) {
 // applying the daily adjustment for each. Today stays "live" / uncommitted.
 // Returns a NEW partial state { health, healthLog, lastEvaluatedDate }.
 // ---------------------------------------------------------------------------
+// `lastEvaluatedDate` is the most recent CLOSED day that has been scored.
+// When fully caught up it equals yesterday — never today, because today is
+// still live. (Storing today here was the bug that froze health at 100 for
+// anyone who opened the app daily: the open day was treated as scored, and
+// the exclusive range then skipped every real day.)
 export function catchUpHealth(state) {
   const today = todayKey();
+  const yesterday = yesterdayKey();
   let health = state.health;
   const healthLog = [...state.healthLog];
   const limit = dailyLimit(state.settings);
 
-  // First ever run: today is live, nothing to close yet.
+  // First ever run: mark yesterday as the boundary so today gets scored
+  // tomorrow. Days before onboarding are never evaluated.
   if (!state.lastEvaluatedDate) {
-    return { health, healthLog, lastEvaluatedDate: today };
+    return { health, healthLog, lastEvaluatedDate: yesterday };
   }
 
-  if (state.lastEvaluatedDate >= today) {
-    // Already up to date (or clock weirdness) — nothing to close.
+  if (state.lastEvaluatedDate >= yesterday) {
+    // Every closed day is already scored (or the clock moved backwards —
+    // never rewind the boundary).
     return { health, healthLog, lastEvaluatedDate: state.lastEvaluatedDate };
   }
 
+  // daysBetweenExclusive(last, today) = last+1 … yesterday: exactly the
+  // fully-closed days we haven't scored yet.
   const missed = daysBetweenExclusive(state.lastEvaluatedDate, today);
-  // include the lastEvaluatedDate boundary day's neighbours correctly:
-  // daysBetweenExclusive(last, today) gives (last, today) exclusive, i.e.
-  // every fully-closed day we haven't scored yet.
   for (const dayKey of missed) {
+    if (healthLog.some((e) => e.date === dayKey)) continue; // never double-score
     const daySpend = spendOnDate(state.transactions, dayKey);
     const { delta, status } = dayAdjustment(daySpend, limit);
     health = clampHealth(health + delta);
     healthLog.push({ date: dayKey, status, score: health, spend: daySpend });
   }
 
-  return { health, healthLog, lastEvaluatedDate: today };
+  return { health, healthLog, lastEvaluatedDate: yesterday };
 }
 
 // ---------------------------------------------------------------------------
@@ -208,7 +223,7 @@ export function likelihood(state, goalName) {
   }
   return {
     level: 'unlikely',
-    label: `Right now, reaching ${goalName || 'your goal'} on time is unlikely — but you can turn it around!`,
+    label: `Reaching ${goalName || 'your goal'} is drifting away — but you can turn it around!`,
     value: avg,
   };
 }
@@ -280,5 +295,6 @@ export function moneyLeftToday(state) {
 export function money(amount, currency = '£') {
   const n = Number.isFinite(amount) ? amount : 0;
   const sign = n < 0 ? '-' : '';
-  return `${sign}${currency}${Math.abs(n).toFixed(2)}`;
+  const decimals = currency === '¥' ? 0 : 2; // yen has no minor unit
+  return `${sign}${currency}${Math.abs(n).toFixed(decimals)}`;
 }

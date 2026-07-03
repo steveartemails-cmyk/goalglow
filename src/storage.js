@@ -15,7 +15,7 @@ export function defaultState() {
     // Profile
     profile: {
       childName: '',
-      parentPin: '', // 4-digit string, parent-locked
+      parentPinHash: '', // hash of the 4-digit parent PIN (never stored in plain text)
     },
 
     // Parent-locked settings
@@ -57,7 +57,19 @@ export function defaultState() {
 
     // Last health threshold band we celebrated crossing up through (60 / 85)
     lastCelebratedBand: 0,
+
+    // Whether we've already thrown the goal-reached party for the current goal
+    goalCelebrated: false,
   };
+}
+
+// Obfuscation, not cryptography: a 4-digit PIN can't be made brute-force-proof,
+// but this keeps it from being read straight out of localStorage.
+export function hashPin(pin) {
+  let h = 5381;
+  const s = 'goalglow:' + pin;
+  for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
+  return 'v1.' + h.toString(36);
 }
 
 export function loadState() {
@@ -66,7 +78,13 @@ export function loadState() {
     if (!raw) return defaultState();
     const parsed = JSON.parse(raw);
     // Merge with defaults so new fields don't break old saves.
-    return deepMerge(defaultState(), parsed);
+    const merged = deepMerge(defaultState(), parsed);
+    // Migrate old saves that stored the PIN in plain text.
+    if (merged.profile.parentPin) {
+      merged.profile.parentPinHash = hashPin(merged.profile.parentPin);
+      delete merged.profile.parentPin;
+    }
+    return merged;
   } catch (e) {
     console.warn('GoalGlow: failed to load state, starting fresh.', e);
     return defaultState();

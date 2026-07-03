@@ -103,6 +103,20 @@ export function Toast({ toast, onClose }) {
 
 // A reusable modal sheet.
 export function Sheet({ open, onClose, children, title }) {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [open, onClose]);
+
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-40 flex items-end justify-center sm:items-center" onClick={onClose}>
