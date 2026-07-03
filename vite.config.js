@@ -4,6 +4,8 @@ import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
+  // '/' locally and on Netlify; CI sets DEPLOY_BASE=/goalglow/ for GitHub Pages
+  base: process.env.DEPLOY_BASE || '/',
   plugins: [
     react(),
     tailwindcss(),
